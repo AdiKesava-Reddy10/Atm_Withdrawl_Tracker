@@ -4,6 +4,7 @@ import numpy as np
 import re
 import pickle
 import os
+import time
 from datetime import datetime
 from sklearn.ensemble import IsolationForest
 
@@ -51,8 +52,8 @@ def get_training_data():
 # --- 4. PAGES ---
 def home_page():
     st.title("🛡️ GuardVigil ATM Analyzer")
-    st.markdown("### *Detecting fraud through behavioral patterns and card-specific limits.*")
-    st.info("Your security is our priority. Log in to manage your ATM security settings.")
+    st.markdown("### *Your Security, Personalized.*")
+    st.info("Advanced behavioral analysis to protect your ATM transactions.")
     col1, col2 = st.columns(2)
     if col1.button("Register New User", use_container_width=True):
         st.session_state['page'] = 'Register'; st.rerun()
@@ -65,7 +66,8 @@ def register_page():
     un = st.text_input("Username")
     ph = st.text_input("Phone Number")
     pw = st.text_input("Create Password", type="password")
-    if st.button("Register"):
+    
+    if st.button("Register", use_container_width=True):
         if un in st.session_state['users']: st.error("Username already taken!")
         elif validate_password(pw):
             st.session_state['users'][un] = {
@@ -74,19 +76,37 @@ def register_page():
             save_users(st.session_state['users'])
             st.success("Account created successfully!"); st.session_state['page'] = 'Login'; st.rerun()
         else: st.error("Password must be 6+ chars with Upper, Lower, Number, and Special char.")
-    if st.button("Back"): st.session_state['page'] = 'Home'; st.rerun()
+    
+    st.write("---")
+    # REDIRECT TO LOGIN
+    st.write("Already have an account?")
+    if st.button("Login Here"):
+        st.session_state['page'] = 'Login'
+        st.rerun()
 
 def login_page():
     st.title("🔓 Secure Login")
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
-    if st.button("Login"):
-        users = st.session_state['users']
-        if u in users and users[u]['password'] == p:
-            st.session_state['logged_in'], st.session_state['current_user'] = True, u
-            st.session_state['page'] = 'Dashboard'; st.rerun()
-        else: st.error("Invalid credentials.")
-    if st.button("Forgot Password?"): st.session_state['page'] = 'Forgot'; st.rerun()
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("Login", use_container_width=True):
+            users = st.session_state['users']
+            if u in users and users[u]['password'] == p:
+                st.session_state['logged_in'], st.session_state['current_user'] = True, u
+                st.session_state['page'] = 'Dashboard'; st.rerun()
+            else: st.error("Invalid credentials.")
+    with col2:
+        if st.button("Forgot Password?", use_container_width=True):
+            st.session_state['page'] = 'Forgot'; st.rerun()
+    
+    st.write("---")
+    # REDIRECT TO REGISTRATION
+    st.write("New to GuardVigil?")
+    if st.button("Create an Account"):
+        st.session_state['page'] = 'Register'
+        st.rerun()
 
 def forgot_password_page():
     st.title("🔑 Reset Password")
@@ -101,6 +121,8 @@ def forgot_password_page():
                 st.success("Password updated!"); st.session_state['page'] = 'Login'; st.rerun()
             else: st.error("New password is too weak.")
         else: st.error("Details do not match.")
+    if st.button("Back to Login"):
+        st.session_state['page'] = 'Login'; st.rerun()
 
 def dashboard():
     user = st.session_state['current_user']
@@ -123,7 +145,6 @@ def dashboard():
         st.divider()
         st.subheader("Your Active Cards")
         for c in user_data['cards']:
-            # RECTIFIED: Using .get() to prevent KeyError if limit is missing
             limit_display = c.get('limit', "Unset")
             st.write(f"✅ {c['type']} (xxxx-{c['num']}) | Limit: **${limit_display}**")
 
@@ -142,7 +163,6 @@ def dashboard():
             
             if st.button("Run Analysis"):
                 status = ""
-                # Use .get() for the limit check too
                 card_limit = card.get('limit', 999999) 
                 
                 if amt > card_limit:
@@ -150,7 +170,8 @@ def dashboard():
                     st.error(f"❌ {status}")
                 else:
                     model = IsolationForest(contamination=0.05).fit(get_training_data())
-                    pred = model.predict(pd.DataFrame([[amt, hr, dist]], columns=['amount', 'hour', 'dist']))
+                    test_point = pd.DataFrame([[amt, hr, dist]], columns=['amount', 'hour', 'dist'])
+                    pred = model.predict(test_point)
                     if pred[0] == -1:
                         status = "FLAGGED: Unusual Activity"
                         st.warning(f"⚠️ {status}")
@@ -158,7 +179,6 @@ def dashboard():
                         status = "APPROVED"
                         st.success(f"✅ {status}")
                 
-                # Ensure history key exists before appending
                 if 'history' not in user_data: user_data['history'] = []
                 user_data['history'].append({
                     "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -194,11 +214,13 @@ with st.sidebar:
             time.sleep(1)
             st.rerun()
     else:
-        st.write("Please log in to see settings.")
+        st.write("Log in to access settings.")
 
 # --- 6. ROUTING ---
 if st.session_state['page'] == 'Home': home_page()
 elif st.session_state['page'] == 'Register': register_page()
 elif st.session_state['page'] == 'Login': login_page()
 elif st.session_state['page'] == 'Forgot': forgot_password_page()
-elif st.session_state['page'] == 'Dashboard': dashboard()
+elif st.session_state['page'] == 'Dashboard': 
+    if st.session_state['logged_in']: dashboard()
+    else: st.session_state['page'] = 'Login'; st.rerun()
