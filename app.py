@@ -12,8 +12,11 @@ DB_FILE = "users_db.pkl"
 
 def load_users():
     if os.path.exists(DB_FILE):
-        with open(DB_FILE, "rb") as f:
-            return pickle.load(f)
+        try:
+            with open(DB_FILE, "rb") as f:
+                return pickle.load(f)
+        except:
+            return {}
     return {}
 
 def save_users(users):
@@ -48,48 +51,56 @@ def get_training_data():
 # --- 4. PAGES ---
 def home_page():
     st.title("🛡️ GuardVigil ATM Analyzer")
-    st.info("Detecting fraud through behavioral patterns and card-specific limits.")
+    st.markdown("### *Detecting fraud through behavioral patterns and card-specific limits.*")
+    st.info("Your security is our priority. Log in to manage your ATM security settings.")
     col1, col2 = st.columns(2)
-    if col1.button("Register", use_container_width=True):
+    if col1.button("Register New User", use_container_width=True):
         st.session_state['page'] = 'Register'; st.rerun()
-    if col2.button("Login", use_container_width=True):
+    if col2.button("Login to Dashboard", use_container_width=True):
         st.session_state['page'] = 'Login'; st.rerun()
 
 def register_page():
-    st.title("📝 Register")
+    st.title("📝 User Registration")
     fn = st.text_input("Full Name")
     un = st.text_input("Username")
-    ph = st.text_input("Phone")
-    pw = st.text_input("Password", type="password")
+    ph = st.text_input("Phone Number")
+    pw = st.text_input("Create Password", type="password")
     if st.button("Register"):
-        if un in st.session_state['users']: st.error("User exists!")
+        if un in st.session_state['users']: st.error("Username already taken!")
         elif validate_password(pw):
-            st.session_state['users'][un] = {"password": pw, "name": fn, "phone": ph, "cards": [], "history": []}
+            st.session_state['users'][un] = {
+                "password": pw, "name": fn, "phone": ph, "cards": [], "history": []
+            }
             save_users(st.session_state['users'])
-            st.success("Registered!"); st.session_state['page'] = 'Login'; st.rerun()
-        else: st.error("Password too weak!")
+            st.success("Account created successfully!"); st.session_state['page'] = 'Login'; st.rerun()
+        else: st.error("Password must be 6+ chars with Upper, Lower, Number, and Special char.")
+    if st.button("Back"): st.session_state['page'] = 'Home'; st.rerun()
 
 def login_page():
-    st.title("🔓 Login")
+    st.title("🔓 Secure Login")
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
     if st.button("Login"):
-        if u in st.session_state['users'] and st.session_state['users'][u]['password'] == p:
+        users = st.session_state['users']
+        if u in users and users[u]['password'] == p:
             st.session_state['logged_in'], st.session_state['current_user'] = True, u
             st.session_state['page'] = 'Dashboard'; st.rerun()
-    if st.button("Forgot Password?"):
-        st.session_state['page'] = 'Forgot'; st.rerun()
+        else: st.error("Invalid credentials.")
+    if st.button("Forgot Password?"): st.session_state['page'] = 'Forgot'; st.rerun()
 
 def forgot_password_page():
-    st.title("🔑 Reset")
+    st.title("🔑 Reset Password")
     u = st.text_input("Username")
-    ph = st.text_input("Phone")
-    npw = st.text_input("New PW", type="password")
-    if st.button("Update"):
+    ph = st.text_input("Phone Number")
+    npw = st.text_input("New Password", type="password")
+    if st.button("Update Password"):
         if u in st.session_state['users'] and st.session_state['users'][u]['phone'] == ph:
-            st.session_state['users'][u]['password'] = npw
-            save_users(st.session_state['users'])
-            st.success("Updated!"); st.session_state['page'] = 'Login'; st.rerun()
+            if validate_password(npw):
+                st.session_state['users'][u]['password'] = npw
+                save_users(st.session_state['users'])
+                st.success("Password updated!"); st.session_state['page'] = 'Login'; st.rerun()
+            else: st.error("New password is too weak.")
+        else: st.error("Details do not match.")
 
 def dashboard():
     user = st.session_state['current_user']
@@ -102,20 +113,24 @@ def dashboard():
         st.subheader("Link a New Card")
         c_type = st.selectbox("Account Type", ["Savings", "Current"])
         c_num = st.text_input("Last 4 Digits", max_chars=4)
-        c_limit = st.number_input("Set Max Withdrawal Limit per Transaction ($)", min_value=10, value=500)
+        c_limit = st.number_input("Set Withdrawal Limit ($)", min_value=1, value=500)
         
         if st.button("Save Card"):
             user_data['cards'].append({"type": c_type, "num": c_num, "limit": c_limit})
             save_users(st.session_state['users'])
-            st.success(f"Card Linked! Transaction Limit set to ${c_limit}")
+            st.success(f"Card Linked with ${c_limit} limit.")
         
+        st.divider()
+        st.subheader("Your Active Cards")
         for c in user_data['cards']:
-            st.write(f"✅ {c['type']} (xxxx-{c['num']}) | **Per-Withdrawal Limit: ${c['limit']}**")
+            # RECTIFIED: Using .get() to prevent KeyError if limit is missing
+            limit_display = c.get('limit', "Unset")
+            st.write(f"✅ {c['type']} (xxxx-{c['num']}) | Limit: **${limit_display}**")
 
     with tab2:
         st.header("Withdrawal Simulator")
         if not user_data['cards']:
-            st.warning("Please add a card first.")
+            st.warning("Please add a card in Management first.")
         else:
             options = [f"{c['type']} (xxxx-{c['num']})" for c in user_data['cards']]
             sel = st.selectbox("Select Card", options=options)
@@ -123,26 +138,28 @@ def dashboard():
             
             amt = st.number_input("Withdrawal Amount ($)", value=50)
             dist = st.number_input("Distance from Home (km)", value=5)
-            hr = st.slider("Hour", 0, 23, 12)
+            hr = st.slider("Hour (0-23)", 0, 23, 12)
             
-            if st.button("Verify Transaction"):
+            if st.button("Run Analysis"):
                 status = ""
-                # 1. Hard Transaction Limit Check
-                if amt > card['limit']:
-                    status = f"FAILED: Exceeded ${card['limit']} limit"
+                # Use .get() for the limit check too
+                card_limit = card.get('limit', 999999) 
+                
+                if amt > card_limit:
+                    status = f"FAILED: Over Limit (${card_limit})"
                     st.error(f"❌ {status}")
                 else:
-                    # 2. AI Pattern Check
                     model = IsolationForest(contamination=0.05).fit(get_training_data())
                     pred = model.predict(pd.DataFrame([[amt, hr, dist]], columns=['amount', 'hour', 'dist']))
                     if pred[0] == -1:
-                        status = "FLAGGED: Unusual Behavior"
+                        status = "FLAGGED: Unusual Activity"
                         st.warning(f"⚠️ {status}")
                     else:
                         status = "APPROVED"
                         st.success(f"✅ {status}")
                 
-                # Log transaction
+                # Ensure history key exists before appending
+                if 'history' not in user_data: user_data['history'] = []
                 user_data['history'].append({
                     "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "card": sel, "amount": amt, "status": status
@@ -150,17 +167,36 @@ def dashboard():
                 save_users(st.session_state['users'])
 
     with tab3:
-        st.header("Recent Activity")
-        if user_data['history']:
-            st.table(pd.DataFrame(user_data['history']).iloc[::-1]) # Show latest first
+        st.header("Transaction Log")
+        history = user_data.get('history', [])
+        if history:
+            st.table(pd.DataFrame(history).iloc[::-1])
         else:
-            st.write("No transactions yet.")
+            st.write("No history found.")
 
-# --- 5. NAVIGATION ---
-if st.sidebar.button("Log Out"):
-    st.session_state['logged_in'] = False
-    st.session_state['page'] = 'Home'; st.rerun()
+# --- 5. SIDEBAR & DELETE ACCOUNT ---
+with st.sidebar:
+    st.header("Account Settings")
+    if st.session_state['logged_in']:
+        if st.button("Log Out"):
+            st.session_state['logged_in'] = False
+            st.session_state['page'] = 'Home'; st.rerun()
+        
+        st.divider()
+        st.subheader("Danger Zone")
+        if st.button("❌ Delete My Account"):
+            curr_user = st.session_state['current_user']
+            del st.session_state['users'][curr_user]
+            save_users(st.session_state['users'])
+            st.session_state['logged_in'] = False
+            st.session_state['page'] = 'Home'
+            st.warning("Account deleted permanently.")
+            time.sleep(1)
+            st.rerun()
+    else:
+        st.write("Please log in to see settings.")
 
+# --- 6. ROUTING ---
 if st.session_state['page'] == 'Home': home_page()
 elif st.session_state['page'] == 'Register': register_page()
 elif st.session_state['page'] == 'Login': login_page()
